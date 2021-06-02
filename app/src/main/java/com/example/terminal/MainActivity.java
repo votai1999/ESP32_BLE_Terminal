@@ -1,5 +1,6 @@
 package com.example.terminal;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ProgressDialog;
@@ -8,8 +9,11 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.Spannable;
 import android.text.SpannableString;
@@ -19,14 +23,18 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.RequiresApi;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
 
@@ -36,20 +44,23 @@ public class MainActivity extends Activity {
     EditText etText;
     Button btnSend;
     Button button_clear_serial;
-    TextView tvSent;
+    Button button_device;
+    TextView tvSent, tvMac;
     ProgressDialog progress;
     ScrollView scrollView;
     BluetoothAdapter myBluetooth = null;
     BluetoothManager bluetoothManager;
     BluetoothSocket btSocket = null;
     boolean isBtConnected = false;
-    String address = "F0:08:D1:5F:F0:36";
+    String address;
     UUID myUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    String s;
+    String s, Mac_popup;
     byte[] buffer = new byte[256];
     int Byte;
     InputStream inputStream = null;
 
+
+    @RequiresApi(api = Build.VERSION_CODES.M)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -61,20 +72,30 @@ public class MainActivity extends Activity {
         btnSend = (Button) findViewById(R.id.buttonSend);
         button_clear_serial = (Button) findViewById(R.id.button_clear_serial);
         tvSent = findViewById(R.id.tvMessageSent);
+        tvMac = (TextView) findViewById(R.id.text_Mac);
+        button_device = (Button) findViewById(R.id.button_device);
         bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         myBluetooth = bluetoothManager.getAdapter();
         scrollView = ((ScrollView) findViewById(R.id.scrollView_terminal));
         Set<BluetoothDevice> devices = myBluetooth.getBondedDevices();
-        for (BluetoothDevice device : devices) {
-            tvSent.append("\nDevice: " + device.getName() + ", " + device);
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this,
+                    Manifest.permission.ACCESS_FINE_LOCATION)) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+            } else {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+            }
         }
         //Disconnect();
-//        if (myBluetooth == null || !myBluetooth.isEnabled()) {
-//            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-//            startActivityForResult(enableBtIntent, 1);
-//        }
+        if (myBluetooth == null || !myBluetooth.isEnabled()) {
+            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            startActivityForResult(enableBtIntent, 0);
+        }
         Clear_Serial();
-        new MainActivity.ConnectBT().execute(); //Call the class to connect
+        Popup_Device();
     }
 
     public void Clear_Serial() {
@@ -101,7 +122,7 @@ public class MainActivity extends Activity {
                     } catch (IOException e) {
                         msg("Error");
                     }
-                    tvSent.append("\nTransmit:   " + s);
+                    tvSent.append("Transmit:   " + s + "\n");
                     scrollView.post(new Runnable() {
                         @Override
                         public void run() {
@@ -127,9 +148,10 @@ public class MainActivity extends Activity {
                         @Override
                         public void run() {
 //                            tvSent.append("Receive data: " + readMessage + "\n");
-                            String readStringBuf = "Receive:   " + readMessage;
+                            String readStringBuf = "Receive:   " + readMessage + "\n";
                             Spannable spannable = new SpannableString(readStringBuf);
-                            spannable.setSpan(new ForegroundColorSpan(Color.rgb(0, 150, 200)), 0, readStringBuf.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            spannable.setSpan(new ForegroundColorSpan(Color.rgb(0, 150, 200)),
+                                    0, readStringBuf.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                             tvSent.append(spannable);
                             scrollView.post(new Runnable() {
                                 @Override
@@ -139,7 +161,6 @@ public class MainActivity extends Activity {
                             });
                         }
                     });
-
                 } catch (IOException e1) {
                     e1.printStackTrace();
                 }
@@ -206,27 +227,51 @@ public class MainActivity extends Activity {
         protected void onPostExecute(Void result) //after the doInBackground, it checks if everything went fine
         {
             super.onPostExecute(result);
-
             if (!ConnectSuccess) {
                 msg("Connection Failed. Is it a SPP Bluetooth? Try again.");
-                finish();
+                Intent myIntent = new Intent(MainActivity.this, PopUpDevice.class);
+                startActivityForResult(myIntent, 1);
             } else {
-                msg("Connected.");
+                String Name_BLE = Mac_popup.substring(0, Mac_popup.indexOf("\n"));
+                Toast.makeText(getApplicationContext(), "Connect to " + Name_BLE, Toast.LENGTH_SHORT).show();
                 isBtConnected = true;
+                tvMac.setText(Mac_popup);
             }
             progress.dismiss();
         }
     }
 
-    @Override
-    protected void onPause() {
-        progress.dismiss();
-        super.onPause();
+    public void Popup_Device() {
+        Intent myIntent = new Intent(MainActivity.this, PopUpDevice.class);
+        button_device.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivityForResult(myIntent, 1);
+            }
+        });
     }
 
     @Override
-    protected void onStop() {
-        progress.dismiss();
-        super.onStop();
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1) {
+            if (resultCode == RESULT_OK) {
+                Mac_popup = data.getStringExtra("Mac");
+                address = Mac_popup.substring(Mac_popup.indexOf("\n") + 1, Mac_popup.length());
+                new MainActivity.ConnectBT().execute(); //Call the class to connect
+            }
+        }
     }
+
+//    @Override
+//    protected void onPause() {
+////        progress.dismiss();
+//        super.onPause();
+//    }
+//
+//    @Override
+//    protected void onStop() {
+////        progress.dismiss();
+//        super.onStop();
+//    }
 }
